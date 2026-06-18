@@ -225,7 +225,8 @@ func registerFlags(fs *pflag.FlagSet) {
 	fs.IntVar(&warmingReadsConcurrency, "warming-reads-concurrency", 500, "Number of concurrent warming reads allowed")
 	fs.DurationVar(&warmingReadsQueryTimeout, "warming-reads-query-timeout", 5*time.Second, "Timeout of warming read queries")
 
-	viperutil.BindFlags(fs,
+	viperutil.BindFlags(
+		fs,
 		enableOnlineDDL,
 		enableDirectDDL,
 		enableBinlogDump,
@@ -263,22 +264,26 @@ var (
 	timings = stats.NewMultiTimings(
 		"VtgateApi",
 		"VtgateApi timings",
-		[]string{"Operation", "Keyspace", "DbType"})
+		[]string{"Operation", "Keyspace", "DbType"},
+	)
 
 	rowsReturned = stats.NewCountersWithMultiLabels(
 		"VtgateApiRowsReturned",
 		"Rows returned through the VTgate API",
-		[]string{"Operation", "Keyspace", "DbType"})
+		[]string{"Operation", "Keyspace", "DbType"},
+	)
 
 	rowsAffected = stats.NewCountersWithMultiLabels(
 		"VtgateApiRowsAffected",
 		"Rows affected by a write (DML) operation through the VTgate API",
-		[]string{"Operation", "Keyspace", "DbType"})
+		[]string{"Operation", "Keyspace", "DbType"},
+	)
 
 	queryTextCharsProcessed = stats.NewCountersWithMultiLabels(
 		"VtgateQueryTextCharactersProcessed",
 		"Query text characters processed through the VTGate API",
-		[]string{"Operation", "Keyspace", "DbType"})
+		[]string{"Operation", "Keyspace", "DbType"},
+	)
 )
 
 // VTGate is the rpc interface to vtgate. Only one instance
@@ -707,7 +712,8 @@ func (vtg *VTGate) StreamExecute(ctx context.Context, mysqlCtx vtgateservice.MyS
 				vtg.rowsReturned.Add(statsKey, int64(len(reply.Rows)))
 				vtg.rowsAffected.Add(statsKey, int64(reply.RowsAffected))
 				return callback(reply)
-			})
+			},
+		)
 		safeSession.RemoveInternalSavepoint()
 	}
 	if err != nil {

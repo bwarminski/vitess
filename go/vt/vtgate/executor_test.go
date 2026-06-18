@@ -709,12 +709,14 @@ func TestExecutorShow(t *testing.T) {
 				append(buildVarCharRow(
 					"utf8mb3",
 					"UTF-8 Unicode",
-					"utf8mb3_general_ci"),
+					"utf8mb3_general_ci",
+				),
 					sqltypes.NewUint32(3)),
 				append(buildVarCharRow(
 					"utf8mb4",
 					"UTF-8 Unicode",
-					collations.MySQL8().LookupName(collations.MySQL8().DefaultConnectionCharset())),
+					collations.MySQL8().LookupName(collations.MySQL8().DefaultConnectionCharset()),
+				),
 					sqltypes.NewUint32(4)),
 			},
 		}
@@ -742,7 +744,8 @@ func TestExecutorShow(t *testing.T) {
 				append(buildVarCharRow(
 					"utf8mb3",
 					"UTF-8 Unicode",
-					"utf8mb3_general_ci"),
+					"utf8mb3_general_ci",
+				),
 					sqltypes.NewUint32(3)),
 			},
 		}
@@ -759,7 +762,8 @@ func TestExecutorShow(t *testing.T) {
 				append(buildVarCharRow(
 					"utf8mb4",
 					"UTF-8 Unicode",
-					collations.MySQL8().LookupName(collations.MySQL8().DefaultConnectionCharset())),
+					collations.MySQL8().LookupName(collations.MySQL8().DefaultConnectionCharset()),
+				),
 					sqltypes.NewUint32(4)),
 			},
 		}
@@ -783,7 +787,8 @@ func TestExecutorShow(t *testing.T) {
 				"Supports transactions, row-level locking, and foreign keys",
 				"YES",
 				"YES",
-				"YES"),
+				"YES",
+			),
 		},
 	}
 	utils.MustMatch(t, wantqr, qr, query)
@@ -799,7 +804,8 @@ func TestExecutorShow(t *testing.T) {
 				"ACTIVE",
 				"STORAGE ENGINE",
 				"NULL",
-				"GPL"),
+				"GPL",
+			),
 		},
 	}
 	utils.MustMatch(t, wantqr, qr, query)
@@ -1876,7 +1882,8 @@ func TestParseEmptyTargetSingleKeyspace(t *testing.T) {
 
 	destKeyspace, destTabletType, _, _, _ := r.ParseDestinationTarget("")
 	if destKeyspace != KsTestUnsharded || destTabletType != topodatapb.TabletType_PRIMARY {
-		assert.Failf(t,
+		assert.Failf(
+			t,
 			"parseDestinationTarget mismatch",
 			"parseDestinationTarget(%s): got (%v, %v), want (%v, %v)",
 			"@primary",
@@ -1901,7 +1908,8 @@ func TestParseEmptyTargetMultiKeyspace(t *testing.T) {
 
 	destKeyspace, destTabletType, _, _, _ := r.ParseDestinationTarget("")
 	if destKeyspace != "" || destTabletType != topodatapb.TabletType_PRIMARY {
-		assert.Failf(t,
+		assert.Failf(
+			t,
 			"parseDestinationTarget mismatch",
 			"parseDestinationTarget(%s): got (%v, %v), want (%v, %v)",
 			"@primary",
@@ -1925,7 +1933,8 @@ func TestParseTargetSingleKeyspace(t *testing.T) {
 
 	destKeyspace, destTabletType, _, _, _ := r.ParseDestinationTarget("@replica")
 	if destKeyspace != KsTestUnsharded || destTabletType != topodatapb.TabletType_REPLICA {
-		assert.Failf(t,
+		assert.Failf(
+			t,
 			"parseDestinationTarget mismatch",
 			"parseDestinationTarget(%s): got (%v, %v), want (%v, %v)",
 			"@replica",

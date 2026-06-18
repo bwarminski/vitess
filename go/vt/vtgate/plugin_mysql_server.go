@@ -314,9 +314,10 @@ func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sq
 	// Table ACLs and Vitess authentication in general.
 	im := c.UserData.Get()
 	ef := callerid.NewEffectiveCallerID(
-		c.User,                  /* principal: who */
-		c.RemoteAddr().String(), /* component: running client process */
-		"VTGate MySQL Connector" /* subcomponent: part of the client */)
+		c.User,                   /* principal: who */
+		c.RemoteAddr().String(),  /* component: running client process */
+		"VTGate MySQL Connector", /* subcomponent: part of the client */
+	)
 	ctx = callerid.NewContext(ctx, ef, im)
 	mysqlCtx := &vtgateMySQLConnection{handler: vh, conn: c}
 
@@ -376,9 +377,10 @@ func (vh *vtgateHandler) ComQueryMulti(c *mysql.Conn, sql string, callback func(
 	// Table ACLs and Vitess authentication in general.
 	im := c.UserData.Get()
 	ef := callerid.NewEffectiveCallerID(
-		c.User,                  /* principal: who */
-		c.RemoteAddr().String(), /* component: running client process */
-		"VTGate MySQL Connector" /* subcomponent: part of the client */)
+		c.User,                   /* principal: who */
+		c.RemoteAddr().String(),  /* component: running client process */
+		"VTGate MySQL Connector", /* subcomponent: part of the client */
+	)
 	ctx = callerid.NewContext(ctx, ef, im)
 	mysqlCtx := &vtgateMySQLConnection{handler: vh, conn: c}
 
@@ -555,9 +557,10 @@ func (vh *vtgateHandler) ComPrepare(c *mysql.Conn, query string) ([]*querypb.Fie
 	// Table ACLs and Vitess authentication in general.
 	im := c.UserData.Get()
 	ef := callerid.NewEffectiveCallerID(
-		c.User,                  /* principal: who */
-		c.RemoteAddr().String(), /* component: running client process */
-		"VTGate MySQL Connector" /* subcomponent: part of the client */)
+		c.User,                   /* principal: who */
+		c.RemoteAddr().String(),  /* component: running client process */
+		"VTGate MySQL Connector", /* subcomponent: part of the client */
+	)
 	ctx = callerid.NewContext(ctx, ef, im)
 
 	session := vh.session(c)
@@ -602,9 +605,10 @@ func (vh *vtgateHandler) ComStmtExecute(c *mysql.Conn, prepare *mysql.PrepareDat
 	// Table ACLs and Vitess authentication in general.
 	im := c.UserData.Get()
 	ef := callerid.NewEffectiveCallerID(
-		c.User,                  /* principal: who */
-		c.RemoteAddr().String(), /* component: running client process */
-		"VTGate MySQL Connector" /* subcomponent: part of the client */)
+		c.User,                   /* principal: who */
+		c.RemoteAddr().String(),  /* component: running client process */
+		"VTGate MySQL Connector", /* subcomponent: part of the client */
+	)
 	ctx = callerid.NewContext(ctx, ef, im)
 	mysqlCtx := &vtgateMySQLConnection{handler: vh, conn: c}
 
@@ -708,9 +712,10 @@ func (vh *vtgateHandler) ComBinlogDumpGTID(c *mysql.Conn, logFile string, logPos
 	// Table ACLs and Vitess authentication in general.
 	im := c.UserData.Get()
 	ef := callerid.NewEffectiveCallerID(
-		c.User,                  /* principal: who */
-		c.RemoteAddr().String(), /* component: running client process */
-		"VTGate MySQL Connector" /* subcomponent: part of the client */)
+		c.User,                   /* principal: who */
+		c.RemoteAddr().String(),  /* component: running client process */
+		"VTGate MySQL Connector", /* subcomponent: part of the client */
+	)
 	ctx = callerid.NewContext(ctx, ef, im)
 
 	// Check if binlog dump is enabled globally

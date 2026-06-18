@@ -111,6 +111,13 @@ type Conn struct {
 	// If there are any ongoing reads or writes, they may get interrupted.
 	conn net.Conn
 
+	// bytesRead tracks the number of bytes read during the current command.
+	bytesRead uint64
+
+	// currentCommandIngressBytes is the number of bytes read for the command
+	// currently being handled, captured at command-read time.
+	currentCommandIngressBytes uint64
+
 	// flavor contains the auto-detected flavor for this client
 	// connection. It is unused for server-side connections.
 	flavor flavor
@@ -154,6 +161,8 @@ type Conn struct {
 
 	// PrepareData is the map to use a prepared statement.
 	PrepareData map[uint32]*PrepareData
+
+	pendingLongDataIngressBytes map[uint32]uint64
 
 	// protects the bufferedWriter and bufferedReader
 	bufMu sync.Mutex
@@ -533,6 +542,10 @@ func (c *Conn) readHeaderFrom(r io.Reader) (int, error) {
 	return int(uint32(c.header[0]) | uint32(c.header[1])<<8 | uint32(c.header[2])<<16), nil
 }
 
+func (c *Conn) recordPacketBytesRead(length int) {
+	c.bytesRead += uint64(PacketHeaderSize + length)
+}
+
 // readEphemeralPacket attempts to read a packet into buffer from sync.Pool.  Do
 // not use this method if the contents of the packet needs to be kept
 // after the next readEphemeralPacket.
@@ -557,6 +570,7 @@ func (c *Conn) readEphemeralPacket() ([]byte, error) {
 	if length == 0 {
 		// This can be caused by the packet after a packet of
 		// exactly size MaxPacketSize.
+		c.recordPacketBytesRead(length)
 		return nil, nil
 	}
 
@@ -566,6 +580,7 @@ func (c *Conn) readEphemeralPacket() ([]byte, error) {
 		if _, err := io.ReadFull(r, *c.currentEphemeralBuffer); err != nil {
 			return nil, vterrors.Wrapf(err, "io.ReadFull(packet body of length %v) failed", length)
 		}
+		c.recordPacketBytesRead(length)
 		return *c.currentEphemeralBuffer, nil
 	}
 
@@ -576,6 +591,7 @@ func (c *Conn) readEphemeralPacket() ([]byte, error) {
 	if _, err := io.ReadFull(r, data); err != nil {
 		return nil, vterrors.Wrapf(err, "io.ReadFull(packet body of length %v) failed", length)
 	}
+	c.recordPacketBytesRead(length)
 	for {
 		next, err := c.readOnePacket()
 		if err != nil {
@@ -617,6 +633,7 @@ func (c *Conn) readEphemeralPacketDirect() ([]byte, error) {
 	if length == 0 {
 		// This can be caused by the packet after a packet of
 		// exactly size MaxPacketSize.
+		c.recordPacketBytesRead(length)
 		return nil, nil
 	}
 
@@ -625,6 +642,7 @@ func (c *Conn) readEphemeralPacketDirect() ([]byte, error) {
 		if _, err := io.ReadFull(r, *c.currentEphemeralBuffer); err != nil {
 			return nil, vterrors.Wrapf(err, "io.ReadFull(packet body of length %v) failed", length)
 		}
+		c.recordPacketBytesRead(length)
 		return *c.currentEphemeralBuffer, nil
 	}
 
@@ -656,6 +674,7 @@ func (c *Conn) readOnePacket() ([]byte, error) {
 	if length == 0 {
 		// This can be caused by the packet after a packet of
 		// exactly size MaxPacketSize.
+		c.recordPacketBytesRead(length)
 		return nil, nil
 	}
 
@@ -663,6 +682,7 @@ func (c *Conn) readOnePacket() ([]byte, error) {
 	if _, err := io.ReadFull(r, data); err != nil {
 		return nil, vterrors.Wrapf(err, "io.ReadFull(packet body of length %v) failed", length)
 	}
+	c.recordPacketBytesRead(length)
 	return data, nil
 }
 
@@ -1073,6 +1093,7 @@ func (c *Conn) writeEOFPacket(flags uint16, warnings uint16) error {
 // incoming packets.
 func (c *Conn) handleNextCommand(handler Handler) bool {
 	c.sequence = 0
+	c.ResetBytesRead()
 	data, err := c.readEphemeralPacket()
 	if err != nil {
 		// Don't log EOF errors. They cause too much spam.
@@ -1082,12 +1103,16 @@ func (c *Conn) handleNextCommand(handler Handler) bool {
 		return false
 	}
 	if len(data) == 0 {
+		c.GetAndResetBytesRead()
 		return false
 	}
 	// before continue to process the packet, check if the connection should be closed or not.
 	if c.IsMarkedForClose() {
+		c.GetAndResetBytesRead()
 		return false
 	}
+
+	c.currentCommandIngressBytes = c.GetAndResetBytesRead()
 
 	switch data[0] {
 	case ComQuit:
@@ -1118,6 +1143,7 @@ func (c *Conn) handleNextCommand(handler Handler) bool {
 		c.recycleReadPacket()
 		if ok {
 			delete(c.PrepareData, stmtID)
+			delete(c.pendingLongDataIngressBytes, stmtID)
 		}
 	case ComStmtReset:
 		return c.handleComStmtReset(data)
@@ -1221,6 +1247,7 @@ func (c *Conn) handleComResetConnection(handler Handler) {
 	handler.ComResetConnection(c)
 	// Reset prepared statements
 	c.PrepareData = make(map[uint32]*PrepareData)
+	c.pendingLongDataIngressBytes = nil
 	err := c.writeOKPacket(&PacketOK{})
 	if err != nil {
 		c.writeErrorPacketFromError(err)
@@ -1250,6 +1277,7 @@ func (c *Conn) handleComStmtReset(data []byte) bool {
 			prepare.BindVars[k] = nil
 		}
 	}
+	delete(c.pendingLongDataIngressBytes, stmtID)
 
 	if err := c.writeOKPacket(&PacketOK{statusFlags: c.StatusFlags}); err != nil {
 		log.Error(fmt.Sprintf("Error writing ComStmtReset OK packet to client %v: %v", c.ConnectionID, err))
@@ -1279,6 +1307,11 @@ func (c *Conn) handleComStmtSendLongData(data []byte) bool {
 		return c.writeErrorPacketFromErrorAndLog(err)
 	}
 
+	if c.pendingLongDataIngressBytes == nil {
+		c.pendingLongDataIngressBytes = make(map[uint32]uint64)
+	}
+	c.pendingLongDataIngressBytes[stmtID] += c.currentCommandIngressBytes
+
 	key := fmt.Sprintf("v%d", paramID+1)
 	if val, ok := prepare.BindVars[key]; ok {
 		val.Value = append(val.Value, chunk...)
@@ -1302,6 +1335,10 @@ func (c *Conn) handleComStmtExecute(handler Handler, data []byte) (kontinue bool
 	queryStart := time.Now()
 	stmtID, _, err := c.parseComStmtExecute(c.PrepareData, data)
 	c.recycleReadPacket()
+	if c.pendingLongDataIngressBytes != nil {
+		c.currentCommandIngressBytes += c.pendingLongDataIngressBytes[stmtID]
+		delete(c.pendingLongDataIngressBytes, stmtID)
+	}
 
 	if stmtID != uint32(0) {
 		defer func() {
@@ -1621,6 +1658,44 @@ func (c *Conn) execQueryMulti(query string, handler Handler) execResult {
 
 var errEmptyStatement = sqlerror.NewSQLError(sqlerror.EREmptyQuery, sqlerror.SSClientError, "Query was empty")
 
+func allocateQueryIngressBytes(total uint64, queries []string) []uint64 {
+	allocations := make([]uint64, len(queries))
+	if len(queries) == 0 || total == 0 {
+		return allocations
+	}
+	var totalWeight uint64
+	for _, query := range queries {
+		totalWeight += uint64(len(query))
+	}
+	if totalWeight == 0 {
+		base := total / uint64(len(allocations))
+		remainder := total % uint64(len(allocations))
+		for i := range allocations {
+			allocations[i] = base
+			if uint64(i) < remainder {
+				allocations[i]++
+			}
+		}
+		return allocations
+	}
+	lastNonEmptyQuery := -1
+	for i, query := range queries {
+		if len(query) > 0 {
+			lastNonEmptyQuery = i
+		}
+	}
+	var allocated uint64
+	for i, query := range queries {
+		if i == lastNonEmptyQuery {
+			allocations[i] = total - allocated
+			break
+		}
+		allocations[i] = total * uint64(len(query)) / totalWeight
+		allocated += allocations[i]
+	}
+	return allocations
+}
+
 func (c *Conn) handleComQuery(handler Handler, data []byte) (kontinue bool) {
 	c.startWriterBuffering()
 	defer func() {
@@ -1650,7 +1725,14 @@ func (c *Conn) handleComQuery(handler Handler, data []byte) (kontinue bool) {
 		return c.writeErrorPacketFromErrorAndLog(errEmptyStatement)
 	}
 
+	commandIngressBytes := c.currentCommandIngressBytes
+	queryIngressBytes := allocateQueryIngressBytes(commandIngressBytes, queries)
+	defer func() {
+		c.currentCommandIngressBytes = commandIngressBytes
+	}()
+
 	for index, sql := range queries {
+		c.currentCommandIngressBytes = queryIngressBytes[index]
 		more := false
 		if index != len(queries)-1 {
 			more = true
@@ -1949,6 +2031,24 @@ func (c *Conn) IsClientUnixSocket() bool {
 // GetRawConn returns the raw net.Conn for nefarious purposes.
 func (c *Conn) GetRawConn() net.Conn {
 	return c.conn
+}
+
+// ResetBytesRead resets the bytes read counter to zero.
+func (c *Conn) ResetBytesRead() {
+	c.bytesRead = 0
+}
+
+// GetAndResetBytesRead returns the current bytes read count and resets it to zero.
+func (c *Conn) GetAndResetBytesRead() uint64 {
+	bytesRead := c.bytesRead
+	c.bytesRead = 0
+	return bytesRead
+}
+
+// IngressBytes returns the number of bytes read for the command currently
+// being handled.
+func (c *Conn) IngressBytes() uint64 {
+	return c.currentCommandIngressBytes
 }
 
 // CancelCtx aborts an existing running query

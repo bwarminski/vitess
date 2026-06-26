@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/stats"
 
 	"vitess.io/vitess/go/sqltypes"
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
@@ -178,7 +179,11 @@ func TestGRPCExecutePrefersStatsHandlerIngressBytes(t *testing.T) {
 		},
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
-	ctx := servenv.ContextWithGRPCIngressBytesForTest(context.Background(), 12345)
+	statsHandler := servenv.GRPCIngressStatsHandler()
+	ctx := statsHandler.TagRPC(context.Background(), &stats.RPCTagInfo{
+		FullMethodName: "/vtgateservice.Vitess/Execute",
+	})
+	statsHandler.HandleRPC(ctx, &stats.InPayload{WireLength: 12345})
 
 	_, err := grpcVTGate.Execute(ctx, request)
 

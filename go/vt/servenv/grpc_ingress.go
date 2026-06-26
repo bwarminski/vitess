@@ -18,12 +18,9 @@ package servenv
 
 import (
 	"context"
-	"strings"
 
 	"google.golang.org/grpc/stats"
 )
-
-const vtgateGRPCMethodPrefix = "/vtgateservice.Vitess/"
 
 type grpcIngressBytesKey struct{}
 
@@ -33,10 +30,7 @@ type grpcIngressBytes struct {
 
 type grpcIngressStatsHandler struct{}
 
-func (grpcIngressStatsHandler) TagRPC(ctx context.Context, info *stats.RPCTagInfo) context.Context {
-	if info == nil || !strings.HasPrefix(info.FullMethodName, vtgateGRPCMethodPrefix) {
-		return ctx
-	}
+func (grpcIngressStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
 	return context.WithValue(ctx, grpcIngressBytesKey{}, &grpcIngressBytes{})
 }
 
@@ -58,14 +52,17 @@ func (grpcIngressStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo
 
 func (grpcIngressStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
 
+// GRPCIngressStatsHandler returns a stats handler that records inbound gRPC
+// payload bytes on the RPC context.
+func GRPCIngressStatsHandler() stats.Handler {
+	return grpcIngressStatsHandler{}
+}
+
+// GRPCIngressBytes returns inbound gRPC payload bytes recorded on ctx.
 func GRPCIngressBytes(ctx context.Context) (uint64, bool) {
 	ingressBytes, ok := ctx.Value(grpcIngressBytesKey{}).(*grpcIngressBytes)
 	if !ok {
 		return 0, false
 	}
 	return ingressBytes.wire, true
-}
-
-func ContextWithGRPCIngressBytesForTest(ctx context.Context, wire uint64) context.Context {
-	return context.WithValue(ctx, grpcIngressBytesKey{}, &grpcIngressBytes{wire: wire})
 }

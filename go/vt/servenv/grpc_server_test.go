@@ -101,7 +101,7 @@ func TestGRPCIngressStatsHandlerRecordsVTGatePayloadBytes(t *testing.T) {
 	assert.Equal(t, uint64(42), ingressBytes)
 }
 
-func TestGRPCIngressStatsHandlerIgnoresNonVTGatePayloadBytes(t *testing.T) {
+func TestGRPCIngressStatsHandlerRecordsNonVTGatePayloadBytes(t *testing.T) {
 	handler := grpcIngressStatsHandler{}
 	ctx := handler.TagRPC(context.Background(), &stats.RPCTagInfo{
 		FullMethodName: "/vtctldservice.Vtctld/GetKeyspaces",
@@ -109,8 +109,9 @@ func TestGRPCIngressStatsHandlerIgnoresNonVTGatePayloadBytes(t *testing.T) {
 
 	handler.HandleRPC(ctx, &stats.InPayload{WireLength: 42})
 
-	_, ok := GRPCIngressBytes(ctx)
-	assert.False(t, ok)
+	ingressBytes, ok := GRPCIngressBytes(ctx)
+	require.True(t, ok)
+	assert.Equal(t, uint64(42), ingressBytes)
 }
 
 func getFreePort() int {

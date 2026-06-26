@@ -18,10 +18,14 @@ package grpcvtgateservice
 
 import (
 	"context"
+	"io"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
@@ -30,6 +34,7 @@ import (
 	querypb "vitess.io/vitess/go/vt/proto/query"
 	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
 	vtgatepb "vitess.io/vitess/go/vt/proto/vtgate"
+	vtgateservicepb "vitess.io/vitess/go/vt/proto/vtgateservice"
 	"vitess.io/vitess/go/vt/servenv"
 	"vitess.io/vitess/go/vt/vtgate/vtgateservice"
 )
@@ -44,6 +49,7 @@ type mockVTGateService struct {
 	executeBatchIngressBytes  []uint64
 	prepareIngressBytes       []uint64
 	streamExecuteIngressBytes []uint64
+	streamMultiIngressBytes   []uint64
 }
 
 func (m *mockVTGateService) Execute(ctx context.Context, mysqlCtx vtgateservice.MySQLConnection, session *vtgatepb.Session, sql string, bindVariables map[string]*querypb.BindVariable, prepared bool) (*vtgatepb.Session, *sqltypes.Result, error) {
@@ -87,6 +93,9 @@ func (m *mockVTGateService) ExecuteMulti(ctx context.Context, mysqlCtx vtgateser
 }
 
 func (m *mockVTGateService) StreamExecuteMulti(ctx context.Context, mysqlCtx vtgateservice.MySQLConnection, session *vtgatepb.Session, sqlString string, callback func(qr sqltypes.QueryResponse, more bool, firstPacket bool) error) (*vtgatepb.Session, error) {
+	if ingressBytes, ok := vtgateservice.IngressBytesFromContext(ctx); ok {
+		m.streamMultiIngressBytes = append(m.streamMultiIngressBytes, ingressBytes)
+	}
 	for i, result := range m.streamResults {
 		qr := sqltypes.QueryResponse{QueryResult: result}
 		more := i < len(m.streamResults)-1
@@ -146,6 +155,41 @@ func (s *fakeStreamExecuteServer) RecvMsg(any) error {
 	return nil
 }
 
+type fakeStreamExecuteMultiServer struct {
+	ctx       context.Context
+	responses []*vtgatepb.StreamExecuteMultiResponse
+}
+
+func (s *fakeStreamExecuteMultiServer) Send(response *vtgatepb.StreamExecuteMultiResponse) error {
+	s.responses = append(s.responses, response)
+	return nil
+}
+
+func (s *fakeStreamExecuteMultiServer) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeStreamExecuteMultiServer) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *fakeStreamExecuteMultiServer) SetTrailer(metadata.MD) {}
+
+func (s *fakeStreamExecuteMultiServer) Context() context.Context {
+	if s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
+}
+
+func (s *fakeStreamExecuteMultiServer) SendMsg(any) error {
+	return nil
+}
+
+func (s *fakeStreamExecuteMultiServer) RecvMsg(any) error {
+	return nil
+}
+
 // TestGRPCExecuteSetsIngressBytes verifies that unary Execute stores the request
 // size estimate in the forwarded context.
 func TestGRPCExecuteSetsIngressBytes(t *testing.T) {
@@ -164,6 +208,27 @@ func TestGRPCExecuteSetsIngressBytes(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{uint64(request.SizeVT())}, mockService.executeIngressBytes)
+}
+
+// TestGRPCExecuteUsesStatsHandlerIngressBytes verifies that a real gRPC server
+// records framed request bytes before invoking the vtgate handler.
+func TestGRPCExecuteUsesStatsHandlerIngressBytes(t *testing.T) {
+	mockService := &mockVTGateService{
+		executeResult: &sqltypes.Result{},
+	}
+	client, cleanup := newStatsHandlerVitessClient(t, mockService)
+	defer cleanup()
+	request := &vtgatepb.ExecuteRequest{
+		Query: &querypb.BoundQuery{
+			Sql: "SELECT id FROM test",
+		},
+		Session: &vtgatepb.Session{Autocommit: true},
+	}
+
+	_, err := client.Execute(context.Background(), request)
+
+	require.NoError(t, err)
+	assert.Equal(t, []uint64{uint64(request.SizeVT()) + 5}, mockService.executeIngressBytes)
 }
 
 // TestGRPCExecutePrefersStatsHandlerIngressBytes verifies that grpc transport
@@ -210,6 +275,51 @@ func TestGRPCStreamExecuteSetsIngressBytes(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{uint64(request.SizeVT())}, mockService.streamExecuteIngressBytes)
+}
+
+// TestGRPCStreamExecuteMultiSetsIngressBytes verifies that streaming ExecuteMulti
+// stores the request size estimate in the forwarded context.
+func TestGRPCStreamExecuteMultiSetsIngressBytes(t *testing.T) {
+	mockService := &mockVTGateService{
+		streamResults: []*sqltypes.Result{{}},
+	}
+	grpcVTGate := &VTGate{server: mockService}
+	request := &vtgatepb.StreamExecuteMultiRequest{
+		Sql:     "select 1;select 222222",
+		Session: &vtgatepb.Session{Autocommit: true},
+	}
+	stream := &fakeStreamExecuteMultiServer{ctx: context.Background()}
+
+	err := grpcVTGate.StreamExecuteMulti(request, stream)
+
+	require.NoError(t, err)
+	assert.Equal(t, []uint64{uint64(request.SizeVT())}, mockService.streamMultiIngressBytes)
+}
+
+// TestGRPCStreamExecuteMultiUsesStatsHandlerIngressBytes verifies that a real
+// streaming gRPC request records framed request bytes before the handler runs.
+func TestGRPCStreamExecuteMultiUsesStatsHandlerIngressBytes(t *testing.T) {
+	mockService := &mockVTGateService{
+		streamResults: []*sqltypes.Result{{}},
+	}
+	client, cleanup := newStatsHandlerVitessClient(t, mockService)
+	defer cleanup()
+	request := &vtgatepb.StreamExecuteMultiRequest{
+		Sql:     "select 1;select 222222",
+		Session: &vtgatepb.Session{Autocommit: true},
+	}
+
+	stream, err := client.StreamExecuteMulti(context.Background(), request)
+	require.NoError(t, err)
+	for {
+		_, err = stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, []uint64{uint64(request.SizeVT()) + 5}, mockService.streamMultiIngressBytes)
 }
 
 // TestGRPCExecuteMultiSetsIngressBytes verifies that ExecuteMulti carries the
@@ -265,4 +375,25 @@ func TestGRPCPrepareSetsIngressBytes(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{uint64(request.SizeVT())}, mockService.prepareIngressBytes)
+}
+
+func newStatsHandlerVitessClient(t *testing.T, service vtgateservice.VTGateService) (vtgateservicepb.VitessClient, func()) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	server := grpc.NewServer(grpc.StatsHandler(servenv.GRPCIngressStatsHandler()))
+	RegisterForTest(server, service)
+	go server.Serve(listener)
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+
+	cleanup := func() {
+		conn.Close()
+		server.GracefulStop()
+		listener.Close()
+	}
+	return vtgateservicepb.NewVitessClient(conn), cleanup
 }

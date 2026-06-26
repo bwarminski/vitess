@@ -130,10 +130,11 @@ func withVTGateContext(ctx context.Context, effectiveCallerID *vtrpcpb.CallerID)
 	if immediate == "" {
 		immediate = unsecureClient
 	}
+	ingressBytes, hasIngressBytes := servenv.GRPCIngressBytes(ctx)
 	ctx = callerid.NewContext(callinfo.GRPCCallInfo(ctx),
 		effectiveCallerID,
 		&querypb.VTGateCallerID{Username: immediate, Groups: securityGroups})
-	if ingressBytes, ok := servenv.GRPCIngressBytes(ctx); ok {
+	if hasIngressBytes {
 		ctx = vtgateservice.ContextWithIngressBytes(ctx, ingressBytes)
 	}
 	return ctx

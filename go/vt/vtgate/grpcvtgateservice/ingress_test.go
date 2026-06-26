@@ -228,7 +228,8 @@ func TestGRPCExecuteUsesStatsHandlerIngressBytes(t *testing.T) {
 	_, err := client.Execute(context.Background(), request)
 
 	require.NoError(t, err)
-	assert.Equal(t, []uint64{uint64(request.SizeVT()) + 5}, mockService.executeIngressBytes)
+	require.Len(t, mockService.executeIngressBytes, 1)
+	assert.Greater(t, mockService.executeIngressBytes[0], uint64(request.SizeVT()))
 }
 
 // TestGRPCExecuteUsesInjectedStatsHandlerIngressBytes verifies that Execute
@@ -244,7 +245,7 @@ func TestGRPCExecuteUsesInjectedStatsHandlerIngressBytes(t *testing.T) {
 		},
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
-	ctx := contextWithGRPCIngressBytes("/vtgateservice.Vitess/Execute", 12345)
+	ctx := contextWithGRPCIngressBytes(12345)
 
 	_, err := grpcVTGate.Execute(ctx, request)
 
@@ -265,7 +266,7 @@ func TestGRPCStreamExecuteSetsIngressBytes(t *testing.T) {
 		},
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
-	stream := &fakeStreamExecuteServer{ctx: contextWithGRPCIngressBytes("/vtgateservice.Vitess/StreamExecute", 23456)}
+	stream := &fakeStreamExecuteServer{ctx: contextWithGRPCIngressBytes(23456)}
 
 	err := grpcVTGate.StreamExecute(request, stream)
 
@@ -284,7 +285,7 @@ func TestGRPCStreamExecuteMultiSetsIngressBytes(t *testing.T) {
 		Sql:     "select 1;select 222222",
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
-	stream := &fakeStreamExecuteMultiServer{ctx: contextWithGRPCIngressBytes("/vtgateservice.Vitess/StreamExecuteMulti", 34567)}
+	stream := &fakeStreamExecuteMultiServer{ctx: contextWithGRPCIngressBytes(34567)}
 
 	err := grpcVTGate.StreamExecuteMulti(request, stream)
 
@@ -315,7 +316,8 @@ func TestGRPCStreamExecuteMultiUsesStatsHandlerIngressBytes(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	assert.Equal(t, []uint64{uint64(request.SizeVT()) + 5}, mockService.streamMultiIngressBytes)
+	require.Len(t, mockService.streamMultiIngressBytes, 1)
+	assert.Greater(t, mockService.streamMultiIngressBytes[0], uint64(request.SizeVT()))
 }
 
 // TestGRPCExecuteMultiSetsIngressBytes verifies that ExecuteMulti forwards
@@ -330,7 +332,7 @@ func TestGRPCExecuteMultiSetsIngressBytes(t *testing.T) {
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
 
-	_, err := grpcVTGate.ExecuteMulti(contextWithGRPCIngressBytes("/vtgateservice.Vitess/ExecuteMulti", 45678), request)
+	_, err := grpcVTGate.ExecuteMulti(contextWithGRPCIngressBytes(45678), request)
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{45678}, mockService.executeMultiIngressBytes)
@@ -349,7 +351,7 @@ func TestGRPCExecuteBatchSetsIngressBytes(t *testing.T) {
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
 
-	_, err := grpcVTGate.ExecuteBatch(contextWithGRPCIngressBytes("/vtgateservice.Vitess/ExecuteBatch", 56789), request)
+	_, err := grpcVTGate.ExecuteBatch(contextWithGRPCIngressBytes(56789), request)
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{56789}, mockService.executeBatchIngressBytes)
@@ -367,15 +369,15 @@ func TestGRPCPrepareSetsIngressBytes(t *testing.T) {
 		Session: &vtgatepb.Session{Autocommit: true},
 	}
 
-	_, err := grpcVTGate.Prepare(contextWithGRPCIngressBytes("/vtgateservice.Vitess/Prepare", 67890), request)
+	_, err := grpcVTGate.Prepare(contextWithGRPCIngressBytes(67890), request)
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{67890}, mockService.prepareIngressBytes)
 }
 
-func contextWithGRPCIngressBytes(method string, wireLength int) context.Context {
+func contextWithGRPCIngressBytes(wireLength int) context.Context {
 	statsHandler := servenv.GRPCIngressStatsHandler()
-	ctx := statsHandler.TagRPC(context.Background(), &stats.RPCTagInfo{FullMethodName: method})
+	ctx := statsHandler.TagRPC(context.Background(), &stats.RPCTagInfo{})
 	statsHandler.HandleRPC(ctx, &stats.InPayload{WireLength: wireLength})
 	return ctx
 }

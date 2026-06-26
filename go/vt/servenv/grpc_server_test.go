@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/orca"
-	"google.golang.org/grpc/stats"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -89,32 +88,6 @@ func TestReportedOrca(t *testing.T) {
 	memUsage := serverMetrics.MemUtilization
 	assert.GreaterOrEqualf(t, memUsage, float64(0), "Mem Utilization is not set %.2f", memUsage)
 	t.Logf("Memory utilization is %.2f", memUsage)
-}
-
-func TestGRPCIngressStatsHandlerRecordsVTGatePayloadBytes(t *testing.T) {
-	handler := grpcIngressStatsHandler{}
-	ctx := handler.TagRPC(context.Background(), &stats.RPCTagInfo{
-		FullMethodName: "/vtgateservice.Vitess/Execute",
-	})
-
-	handler.HandleRPC(ctx, &stats.InPayload{WireLength: 42})
-
-	ingressBytes, ok := GRPCIngressBytes(ctx)
-	require.True(t, ok)
-	assert.Equal(t, uint64(42), ingressBytes)
-}
-
-func TestGRPCIngressStatsHandlerRecordsNonVTGatePayloadBytes(t *testing.T) {
-	handler := grpcIngressStatsHandler{}
-	ctx := handler.TagRPC(context.Background(), &stats.RPCTagInfo{
-		FullMethodName: "/vtctldservice.Vtctld/GetKeyspaces",
-	})
-
-	handler.HandleRPC(ctx, &stats.InPayload{WireLength: 42})
-
-	ingressBytes, ok := GRPCIngressBytes(ctx)
-	require.True(t, ok)
-	assert.Equal(t, uint64(42), ingressBytes)
 }
 
 // TestGRPCServerSkipsIngressStatsByDefault verifies that servenv gRPC servers

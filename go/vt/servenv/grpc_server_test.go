@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/orca"
+	"google.golang.org/grpc/stats"
 )
 
 func TestEmpty(t *testing.T) {
@@ -85,6 +86,31 @@ func TestReportedOrca(t *testing.T) {
 	memUsage := serverMetrics.MemUtilization
 	assert.GreaterOrEqualf(t, memUsage, float64(0), "Mem Utilization is not set %.2f", memUsage)
 	t.Logf("Memory utilization is %.2f", memUsage)
+}
+
+func TestGRPCIngressStatsHandlerRecordsVTGatePayloadBytes(t *testing.T) {
+	handler := grpcIngressStatsHandler{}
+	ctx := handler.TagRPC(context.Background(), &stats.RPCTagInfo{
+		FullMethodName: "/vtgateservice.Vitess/Execute",
+	})
+
+	handler.HandleRPC(ctx, &stats.InPayload{WireLength: 42})
+
+	ingressBytes, ok := GRPCIngressBytes(ctx)
+	require.True(t, ok)
+	assert.Equal(t, uint64(42), ingressBytes)
+}
+
+func TestGRPCIngressStatsHandlerIgnoresNonVTGatePayloadBytes(t *testing.T) {
+	handler := grpcIngressStatsHandler{}
+	ctx := handler.TagRPC(context.Background(), &stats.RPCTagInfo{
+		FullMethodName: "/vtctldservice.Vtctld/GetKeyspaces",
+	})
+
+	handler.HandleRPC(ctx, &stats.InPayload{WireLength: 42})
+
+	_, ok := GRPCIngressBytes(ctx)
+	assert.False(t, ok)
 }
 
 func getFreePort() int {

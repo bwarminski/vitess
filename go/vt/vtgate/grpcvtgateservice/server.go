@@ -135,14 +135,22 @@ func withCallerIDContext(ctx context.Context, effectiveCallerID *vtrpcpb.CallerI
 		&querypb.VTGateCallerID{Username: immediate, Groups: securityGroups})
 }
 
+func contextWithIngressBytes(ctx context.Context, requestSize uint64) context.Context {
+	if ingressBytes, ok := servenv.GRPCIngressBytes(ctx); ok {
+		return vtgateservice.ContextWithIngressBytes(ctx, ingressBytes)
+	}
+
+	// The RPC handler does not always have the inbound framed byte count. Use SizeVT
+	// as a stable approximation of the protobuf request body; it includes query text
+	// and bind variables, but excludes gRPC/HTTP2 framing overhead.
+	return vtgateservice.ContextWithIngressBytes(ctx, requestSize)
+}
+
 // Execute is the RPC version of vtgateservice.VTGateService method
 func (vtg *VTGate) Execute(ctx context.Context, request *vtgatepb.ExecuteRequest) (response *vtgatepb.ExecuteResponse, err error) {
 	defer vtg.server.HandlePanic(&err)
 	ctx = withCallerIDContext(ctx, request.CallerId)
-	// The RPC handler does not have the exact inbound framed byte count. Use SizeVT
-	// as a stable approximation of the protobuf request body; it includes query text
-	// and bind variables, but excludes gRPC/HTTP2 framing overhead.
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	// Handle backward compatibility.
 	session := request.Session
@@ -161,7 +169,7 @@ func (vtg *VTGate) Execute(ctx context.Context, request *vtgatepb.ExecuteRequest
 func (vtg *VTGate) ExecuteMulti(ctx context.Context, request *vtgatepb.ExecuteMultiRequest) (response *vtgatepb.ExecuteMultiResponse, err error) {
 	defer vtg.server.HandlePanic(&err)
 	ctx = withCallerIDContext(ctx, request.CallerId)
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	// Handle backward compatibility.
 	session := request.Session
@@ -179,7 +187,7 @@ func (vtg *VTGate) ExecuteMulti(ctx context.Context, request *vtgatepb.ExecuteMu
 func (vtg *VTGate) StreamExecuteMulti(request *vtgatepb.StreamExecuteMultiRequest, stream vtgateservicepb.Vitess_StreamExecuteMultiServer) (err error) {
 	defer vtg.server.HandlePanic(&err)
 	ctx := withCallerIDContext(stream.Context(), request.CallerId)
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	session := request.Session
 	if session == nil {
@@ -223,7 +231,7 @@ func (vtg *VTGate) ExecuteBatch(ctx context.Context, request *vtgatepb.ExecuteBa
 		sqlQueries[queryNum] = query.Sql
 		bindVars[queryNum] = query.BindVariables
 	}
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	// Handle backward compatibility.
 	session := request.Session
@@ -242,7 +250,7 @@ func (vtg *VTGate) ExecuteBatch(ctx context.Context, request *vtgatepb.ExecuteBa
 func (vtg *VTGate) StreamExecute(request *vtgatepb.StreamExecuteRequest, stream vtgateservicepb.Vitess_StreamExecuteServer) (err error) {
 	defer vtg.server.HandlePanic(&err)
 	ctx := withCallerIDContext(stream.Context(), request.CallerId)
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	// Handle backward compatibility.
 	session := request.Session
@@ -280,7 +288,7 @@ func (vtg *VTGate) StreamExecute(request *vtgatepb.StreamExecuteRequest, stream 
 func (vtg *VTGate) Prepare(ctx context.Context, request *vtgatepb.PrepareRequest) (response *vtgatepb.PrepareResponse, err error) {
 	defer vtg.server.HandlePanic(&err)
 	ctx = withCallerIDContext(ctx, request.CallerId)
-	ctx = vtgateservice.ContextWithIngressBytes(ctx, uint64(request.SizeVT()))
+	ctx = contextWithIngressBytes(ctx, uint64(request.SizeVT()))
 
 	session := request.Session
 	if session == nil {

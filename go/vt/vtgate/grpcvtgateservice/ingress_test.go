@@ -29,6 +29,7 @@ import (
 	querypb "vitess.io/vitess/go/vt/proto/query"
 	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
 	vtgatepb "vitess.io/vitess/go/vt/proto/vtgate"
+	"vitess.io/vitess/go/vt/servenv"
 	"vitess.io/vitess/go/vt/vtgate/vtgateservice"
 )
 
@@ -162,6 +163,27 @@ func TestGRPCExecuteSetsIngressBytes(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{uint64(request.SizeVT())}, mockService.executeIngressBytes)
+}
+
+// TestGRPCExecutePrefersStatsHandlerIngressBytes verifies that grpc transport
+// byte accounting takes precedence over the protobuf size estimate.
+func TestGRPCExecutePrefersStatsHandlerIngressBytes(t *testing.T) {
+	mockService := &mockVTGateService{
+		executeResult: &sqltypes.Result{},
+	}
+	grpcVTGate := &VTGate{server: mockService}
+	request := &vtgatepb.ExecuteRequest{
+		Query: &querypb.BoundQuery{
+			Sql: "SELECT id FROM test",
+		},
+		Session: &vtgatepb.Session{Autocommit: true},
+	}
+	ctx := servenv.ContextWithGRPCIngressBytesForTest(context.Background(), 12345)
+
+	_, err := grpcVTGate.Execute(ctx, request)
+
+	require.NoError(t, err)
+	assert.Equal(t, []uint64{12345}, mockService.executeIngressBytes)
 }
 
 // TestGRPCStreamExecuteSetsIngressBytes verifies that streaming Execute stores

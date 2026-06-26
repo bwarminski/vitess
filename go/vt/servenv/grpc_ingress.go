@@ -28,6 +28,8 @@ type grpcIngressBytes struct {
 	wire uint64
 }
 
+var gRPCIngressStatsEnabled bool
+
 type grpcIngressStatsHandler struct{}
 
 func (grpcIngressStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
@@ -56,6 +58,12 @@ func (grpcIngressStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
 // payload bytes on the RPC context.
 func GRPCIngressStatsHandler() stats.Handler {
 	return grpcIngressStatsHandler{}
+}
+
+// EnableGRPCIngressStats records inbound gRPC payload bytes on RPC contexts for
+// gRPC servers created by servenv.
+func EnableGRPCIngressStats() {
+	gRPCIngressStatsEnabled = true
 }
 
 // GRPCIngressBytes returns inbound gRPC payload bytes recorded on ctx.

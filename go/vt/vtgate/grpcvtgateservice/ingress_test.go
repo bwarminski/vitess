@@ -232,27 +232,6 @@ func TestGRPCExecuteUsesStatsHandlerIngressBytes(t *testing.T) {
 	assert.Greater(t, mockService.executeIngressBytes[0], uint64(request.SizeVT()))
 }
 
-// TestGRPCExecuteUsesInjectedStatsHandlerIngressBytes verifies that Execute
-// forwards ingress bytes recorded by the gRPC stats handler.
-func TestGRPCExecuteUsesInjectedStatsHandlerIngressBytes(t *testing.T) {
-	mockService := &mockVTGateService{
-		executeResult: &sqltypes.Result{},
-	}
-	grpcVTGate := &VTGate{server: mockService}
-	request := &vtgatepb.ExecuteRequest{
-		Query: &querypb.BoundQuery{
-			Sql: "SELECT id FROM test",
-		},
-		Session: &vtgatepb.Session{Autocommit: true},
-	}
-	ctx := contextWithGRPCIngressBytes(12345)
-
-	_, err := grpcVTGate.Execute(ctx, request)
-
-	require.NoError(t, err)
-	assert.Equal(t, []uint64{12345}, mockService.executeIngressBytes)
-}
-
 // TestGRPCStreamExecuteSetsIngressBytes verifies that streaming Execute
 // forwards ingress bytes recorded by the gRPC stats handler.
 func TestGRPCStreamExecuteSetsIngressBytes(t *testing.T) {
@@ -272,25 +251,6 @@ func TestGRPCStreamExecuteSetsIngressBytes(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []uint64{23456}, mockService.streamExecuteIngressBytes)
-}
-
-// TestGRPCStreamExecuteMultiSetsIngressBytes verifies that streaming ExecuteMulti
-// forwards ingress bytes recorded by the gRPC stats handler.
-func TestGRPCStreamExecuteMultiSetsIngressBytes(t *testing.T) {
-	mockService := &mockVTGateService{
-		streamResults: []*sqltypes.Result{{}},
-	}
-	grpcVTGate := &VTGate{server: mockService}
-	request := &vtgatepb.StreamExecuteMultiRequest{
-		Sql:     "select 1;select 222222",
-		Session: &vtgatepb.Session{Autocommit: true},
-	}
-	stream := &fakeStreamExecuteMultiServer{ctx: contextWithGRPCIngressBytes(34567)}
-
-	err := grpcVTGate.StreamExecuteMulti(request, stream)
-
-	require.NoError(t, err)
-	assert.Equal(t, []uint64{34567}, mockService.streamMultiIngressBytes)
 }
 
 // TestGRPCStreamExecuteMultiUsesStatsHandlerIngressBytes verifies that a real

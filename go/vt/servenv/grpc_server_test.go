@@ -72,14 +72,20 @@ func TestOrcaRecorder(t *testing.T) {
 
 func TestReportedOrca(t *testing.T) {
 	// Set the port to enable gRPC server.
-	withTempVar(&gRPCPort, getFreePort())
-	withTempVar(&gRPCEnableOrcaMetrics, true)
-	withTempVar(&GRPCServerMetricsRecorder, nil)
+	restorePort := withTempVar(&gRPCPort, getFreePort())
+	defer restorePort()
+	restoreOrcaMetrics := withTempVar(&gRPCEnableOrcaMetrics, true)
+	defer restoreOrcaMetrics()
+	restoreMetricsRecorder := withTempVar(&GRPCServerMetricsRecorder, nil)
+	defer restoreMetricsRecorder()
+	restoreGRPCServer := withTempVar(&GRPCServer, (*grpc.Server)(nil))
+	defer restoreGRPCServer()
 
 	createGRPCServer()
-	assert.NotNil(t, GRPCServerMetricsRecorder, "GRPCServerMetricsRecorder should be initialized when gRPCEnableOrcaMetrics is false")
+	assert.NotNil(t, GRPCServerMetricsRecorder, "GRPCServerMetricsRecorder should be initialized when gRPCEnableOrcaMetrics is true")
+	GRPCServerMetricsRecorder.SetCPUUtilization(getCpuUsage())
+	GRPCServerMetricsRecorder.SetMemoryUtilization(getMemoryUsage())
 
-	serveGRPC()
 	serverMetrics := GRPCServerMetricsRecorder.ServerMetrics()
 	cpuUsage := serverMetrics.CPUUtilization
 	assert.GreaterOrEqualf(t, cpuUsage, float64(0), "CPU Utilization is not set %.2f", cpuUsage)
@@ -158,18 +164,34 @@ var ingressStatsTestServiceDesc = grpc.ServiceDesc{
 func runIngressStatsTestRPC(t *testing.T, ingressBytes *uint64) {
 	t.Helper()
 
-	port := getFreePort()
-	defer withTempVar(&gRPCPort, port)()
-	defer withTempVar(&gRPCBindAddress, "127.0.0.1")()
-	defer withTempVar(&GRPCServer, (*grpc.Server)(nil))()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	restorePort := withTempVar(&gRPCPort, listener.Addr().(*net.TCPAddr).Port)
+	defer restorePort()
+	restoreBindAddress := withTempVar(&gRPCBindAddress, "127.0.0.1")
+	defer restoreBindAddress()
+	restoreGRPCServer := withTempVar(&GRPCServer, (*grpc.Server)(nil))
+	defer restoreGRPCServer()
 
 	createGRPCServer()
-	require.NotNil(t, GRPCServer)
-	GRPCServer.RegisterService(&ingressStatsTestServiceDesc, &ingressStatsTestServer{ingressBytes: ingressBytes})
-	serveGRPC()
-	defer GRPCServer.Stop()
+	server := GRPCServer
+	require.NotNil(t, server)
+	server.RegisterService(&ingressStatsTestServiceDesc, &ingressStatsTestServer{ingressBytes: ingressBytes})
 
-	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", port), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+	defer func() {
+		server.Stop()
+		if err := <-serveErr; err != nil {
+			require.ErrorIs(t, err, grpc.ErrServerStopped)
+		}
+	}()
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
